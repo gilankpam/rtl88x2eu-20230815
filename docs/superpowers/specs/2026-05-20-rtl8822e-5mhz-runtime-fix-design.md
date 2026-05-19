@@ -106,6 +106,39 @@ The existing GS quirk where one adapter drifts back to 40 MHz after wfb-server r
 - **TX rate tables** may have additional BW-keyed entries beyond the four registers identified. If 5 MHz video flows but at unexpected rates, follow up by auditing `hal/phydm/halrf/rtl8822e/halrf_iqk_8822e.c` and any TX power tables keyed on BW.
 - **CCK PD threshold** in phydm is set the same for BW5 and BW10 in `phydm_hal_api8822e.c:2136-2137`; if 5 MHz floods the chip with false CCK detections, may need to gate or adjust.
 
+## Post-implementation findings (2026-05-20)
+
+The implementation was carried out as specified and validated on the live drone (`192.168.10.152`) + GS (`10.18.0.1`) pair. **Outcome:**
+
+- ✅ 20 MHz regression — 2279 packets/6 s, 0 lost.
+- ✅ 10 MHz regression — 2306 packets/6 s, 0 lost. (Runtime path now correctly programs HALMAC MAC clock for BW10; previously this worked despite the wrong clock because the BB/MAC ratio at 10 MHz was tolerable.)
+- ✅ Transition ladder (20→10→5→10→20) — 569/581/0/579/573 packets per 3 s; clean recovery after the 5 MHz step.
+- ✅ Rapid 5↔20 stress (5 rounds) — no kernel oops, no DMA stalls, 933 packets in final 5 s window at HT20.
+- ❌ **5 MHz video did not flow.** Drone TX bytes increment, all four target registers verified at the correct BW5 values (`REG_AFE_CTRL1 = 0x300000`, `REG_USTIME_TSF = 0x14`, `REG_TBTT_PROHIBIT = 0x0f / hold 0x90`, `REG_CCK_CHECK |= BIT(7)`), but the GS adapter at BW5 receives 0 frames per its kernel RX counter. The chip is producing RF output but not a peer-decodable 802.11 waveform.
+
+### Why 5 MHz doesn't reach the air
+
+We attempted three increasingly aggressive remediations beyond the spec'd patch:
+
+1. **Expand `rtl8822e_apply_bw_side_effects` to also program SLOT / PIFS / EDCA / SIFS / ACK / EIFS / PHY_REQ_DELAY at runtime** (mirroring the remaining BW-keyed branches in `halmac_init_8822e.c`). Result: regressed 10 MHz to 0 packets. The runtime injection of EDCA params or SIFS into a live monitor-mode adapter interferes with TX queue admission. Reverted.
+
+2. **Enable `CONFIG_NARROWBAND_SUPPORTING` at compile time and modprobe with `rtw_nb_config=5`** (the upstream-intended path for BW5). Result: USB device probe failed; `wlan0` never appeared; recovery required normal modprobe. The chip cannot complete its init sequence with `HALMAC_BW_5` set at poweron via the registry path on this fork.
+
+3. **Inspected the IQK and DC-cancellation paths** — both skip BW5 (`phydm.c:3795`, `halrf_iqk_8822e.c:1605`). TX power tables share BW20 entries for BW5/10/20 (`hal_com_phycfg.c:2548`). No additional software toggles found that the runtime path could exercise.
+
+The fork's own `/proc/.../monitor_chan_override` help documents `bw: 10/20/40/80` and conspicuously omits 5. Combined with the above, **5 MHz monitor-mode TX is best characterized as not implemented at the chip/firmware level in this fork**, regardless of how the MAC-side init is sequenced. Making it work would require either chip docs we don't have, vendor firmware updates, or a different chip revision.
+
+### Net value of the merged patch
+
+The minimal patch *does* deliver real value:
+
+- The runtime BW-change path (`iw dev wlan0 set freq <ch> <width>`) now correctly programs HALMAC MAC clock, TBTT timing, CCK_CHECK bit, and PhyDM BW hook for any target width. Previously these were only set at modprobe time under a registry guard that's off in the FPV build profile.
+- 10 MHz operation, previously working "by accident" (the BB/MAC clock skew was small enough at 10 MHz for the chip to tolerate), is now backed by the correct register state. Symbol timing is on spec rather than relying on chip tolerance.
+- Transitions through and out of BW5 are safe — the helper's idempotency means going from BW5 back to BW10/20 correctly restores the wider-BW register values.
+- Cleaner runtime path lays the groundwork for adaptive-BW work if 5 MHz support ever lands at the firmware level.
+
+5 MHz remains documented as the goal in this spec; the patch programs everything *we* can program for it. The remaining gap is in vendor firmware / chip behavior.
+
 ## References
 
 - Investigation transcript: this conversation, 2026-05-19 / 2026-05-20.
