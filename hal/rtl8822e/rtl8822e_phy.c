@@ -916,8 +916,6 @@ static void mac_switch_bandwidth(PADAPTER adapter, u8 pri_ch_idx)
  */
 static void rtl8822e_apply_bw_side_effects(PADAPTER adapter, u8 target_bw)
 {
-	PHAL_DATA_TYPE hal = GET_HAL_DATA(adapter);
-	struct dm_struct *p_dm_odm = &hal->odmpriv;
 	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
 	struct halmac_adapter *mac = dvobj_to_halmac(dvobj);
 	struct halmac_api *api = HALMAC_GET_API(mac);
@@ -950,10 +948,7 @@ static void rtl8822e_apply_bw_side_effects(PADAPTER adapter, u8 target_bw)
 		tbtt_hold  = TBTT_PROHIBIT_HOLD_TIME;
 	}
 
-	/* 3. PhyDM BW hook (re-program so phydm reads the right BW during BB switch) */
-	odm_cmn_info_hook(p_dm_odm, ODM_CMNINFO_BW, &target_bw);
-
-	/* 4. CCK_CHECK: enable narrow-band CCK check for BW5/BW10, disable otherwise */
+	/* 3. CCK_CHECK: enable narrow-band CCK check for BW5/BW10, disable otherwise */
 	cck_check = rtw_read8(adapter, REG_CCK_CHECK_8822E);
 	if (target_bw == CHANNEL_WIDTH_5 || target_bw == CHANNEL_WIDTH_10)
 		cck_check |= BIT_CHECK_CCK_EN_8822E;
@@ -961,13 +956,13 @@ static void rtl8822e_apply_bw_side_effects(PADAPTER adapter, u8 target_bw)
 		cck_check &= ~BIT_CHECK_CCK_EN_8822E;
 	rtw_write8(adapter, REG_CCK_CHECK_8822E, cck_check);
 
-	/* 5. TBTT prohibit setup time + 12-bit hold time (offsets 0/1/2 of 0x540) */
+	/* 4. TBTT prohibit setup time + 12-bit hold time (offsets 0/1/2 of 0x540) */
 	rtw_write8(adapter, REG_TBTT_PROHIBIT, tbtt_setup);
 	rtw_write8(adapter, REG_TBTT_PROHIBIT + 1, tbtt_hold & 0xFF);
 	rtw_write8(adapter, REG_TBTT_PROHIBIT + 2,
 		(rtw_read8(adapter, REG_TBTT_PROHIBIT + 2) & 0xF0) | ((tbtt_hold >> 8) & 0x0F));
 
-	/* 6. HALMAC HW_BANDWIDTH: drives cfg_bw_88xx() + cfg_mac_clk_88xx() which
+	/* 5. HALMAC HW_BANDWIDTH: drives cfg_bw_88xx() + cfg_mac_clk_88xx() which
 	 *    programs REG_AFE_CTRL1 MAC clock selector, REG_USTIME_TSF, REG_USTIME_EDCA.
 	 *    This is the single most important write -- without it, MAC clock stays
 	 *    at the BW20 default (80 MHz) while BB clocks are at 5/10 MHz, and the
