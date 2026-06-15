@@ -948,13 +948,14 @@ static void rtl8822e_apply_bw_side_effects(PADAPTER adapter, u8 target_bw)
 		tbtt_hold  = TBTT_PROHIBIT_HOLD_TIME;
 	}
 
-	/* 3. CCK_CHECK: enable narrow-band CCK check for BW5/BW10, disable otherwise */
-	cck_check = rtw_read8(adapter, REG_CCK_CHECK_8822E);
-	if (target_bw == CHANNEL_WIDTH_5 || target_bw == CHANNEL_WIDTH_10)
-		cck_check |= BIT_CHECK_CCK_EN_8822E;
-	else
-		cck_check &= ~BIT_CHECK_CCK_EN_8822E;
-	rtw_write8(adapter, REG_CCK_CHECK_8822E, cck_check);
+	/* 3. CCK_CHECK: force narrow-band CCK check for BW5/BW10. For wider BW,
+	 *    leave the bit as cfg_ch_88xx() programmed it -- it already tracks the
+	 *    band (ch>35 => BIT set for 5GHz). Clearing it here would clobber that
+	 *    5GHz setting on every channel switch. */
+	if (target_bw == CHANNEL_WIDTH_5 || target_bw == CHANNEL_WIDTH_10) {
+		cck_check = rtw_read8(adapter, REG_CCK_CHECK_8822E) | BIT_CHECK_CCK_EN_8822E;
+		rtw_write8(adapter, REG_CCK_CHECK_8822E, cck_check);
+	}
 
 	/* 4. TBTT prohibit setup time + 12-bit hold time (offsets 0/1/2 of 0x540) */
 	rtw_write8(adapter, REG_TBTT_PROHIBIT, tbtt_setup);
@@ -1009,9 +1010,9 @@ static void switch_chnl_and_set_bw_by_drv(PADAPTER adapter, u8 switch_band)
 		/* 3.1 set MAC register */
 		mac_switch_bandwidth(adapter, pri_ch_idx);
 
-		/* 3.2 set runtime-narrowband side effects (HALMAC bw, TBTT, DM hook,
-		 * CCK_CHECK). Must run before the BB switch so BB clock dividers
-		 * derive from the corrected MAC clock. Idempotent for non-narrow BWs. */
+		/* 3.2 set runtime-narrowband side effects (HALMAC bw, TBTT, CCK_CHECK).
+		 * Must run before the BB switch so BB clock dividers derive from the
+		 * corrected MAC clock. Idempotent for non-narrow BWs. */
 		rtl8822e_apply_bw_side_effects(adapter, hal->current_channel_bw);
 
 		/* 3.3 set BB/RF registet */
