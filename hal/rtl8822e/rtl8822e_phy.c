@@ -901,6 +901,76 @@ static void mac_switch_bandwidth(PADAPTER adapter, u8 pri_ch_idx)
 	}
 }
 
+/*
+ * Apply per-BW side effects that the modprobe-time CONFIG_NARROWBAND_SUPPORTING
+ * path normally programs once at poweron. We re-apply them on every runtime
+ * BW change so that "iw set freq <ch> 5MHz/10MHz/20MHz/..." works without
+ * requiring rtw_nb_config to be set.
+ *
+ * Idempotent: writes absolute values keyed on target_bw. Re-entering the same
+ * BW is a no-op; transitioning out of narrow-band (e.g. 5->20) restores the
+ * 20-MHz baseline values.
+ *
+ * Must be called BEFORE config_phydm_switch_bandwidth_8822e() so the BB switch
+ * sees the corrected MAC clock.
+ */
+static void rtl8822e_apply_bw_side_effects(PADAPTER adapter, u8 target_bw)
+{
+	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
+	struct halmac_adapter *mac = dvobj_to_halmac(dvobj);
+	struct halmac_api *api = HALMAC_GET_API(mac);
+	enum halmac_bw bw_type = HALMAC_BW_20;
+	u8 cck_check;
+	u8 tbtt_setup;
+	u16 tbtt_hold;
+
+	/* 1. Map CHANNEL_WIDTH_* -> HALMAC_BW_* */
+	switch (target_bw) {
+	case CHANNEL_WIDTH_5:	bw_type = HALMAC_BW_5;	break;
+	case CHANNEL_WIDTH_10:	bw_type = HALMAC_BW_10;	break;
+	case CHANNEL_WIDTH_20:	bw_type = HALMAC_BW_20;	break;
+	case CHANNEL_WIDTH_40:	bw_type = HALMAC_BW_40;	break;
+	case CHANNEL_WIDTH_80:	bw_type = HALMAC_BW_80;	break;
+	default:
+		bw_type = HALMAC_BW_20;
+		break;
+	}
+
+	/* 2. Per-BW values for TBTT and CCK_CHECK */
+	if (target_bw == CHANNEL_WIDTH_5) {
+		tbtt_setup = 0xf;
+		tbtt_hold  = TBTT_PROHIBIT_HOLD_TIME_5M;
+	} else if (target_bw == CHANNEL_WIDTH_10) {
+		tbtt_setup = 0x8;
+		tbtt_hold  = TBTT_PROHIBIT_HOLD_TIME_10M;
+	} else {
+		tbtt_setup = TBTT_PROHIBIT_SETUP_TIME;
+		tbtt_hold  = TBTT_PROHIBIT_HOLD_TIME;
+	}
+
+	/* 3. CCK_CHECK: force narrow-band CCK check for BW5/BW10. For wider BW,
+	 *    leave the bit as cfg_ch_88xx() programmed it -- it already tracks the
+	 *    band (ch>35 => BIT set for 5GHz). Clearing it here would clobber that
+	 *    5GHz setting on every channel switch. */
+	if (target_bw == CHANNEL_WIDTH_5 || target_bw == CHANNEL_WIDTH_10) {
+		cck_check = rtw_read8(adapter, REG_CCK_CHECK_8822E) | BIT_CHECK_CCK_EN_8822E;
+		rtw_write8(adapter, REG_CCK_CHECK_8822E, cck_check);
+	}
+
+	/* 4. TBTT prohibit setup time + 12-bit hold time (offsets 0/1/2 of 0x540) */
+	rtw_write8(adapter, REG_TBTT_PROHIBIT, tbtt_setup);
+	rtw_write8(adapter, REG_TBTT_PROHIBIT + 1, tbtt_hold & 0xFF);
+	rtw_write8(adapter, REG_TBTT_PROHIBIT + 2,
+		(rtw_read8(adapter, REG_TBTT_PROHIBIT + 2) & 0xF0) | ((tbtt_hold >> 8) & 0x0F));
+
+	/* 5. HALMAC HW_BANDWIDTH: drives cfg_bw_88xx() + cfg_mac_clk_88xx() which
+	 *    programs REG_AFE_CTRL1 MAC clock selector, REG_USTIME_TSF, REG_USTIME_EDCA.
+	 *    This is the single most important write -- without it, MAC clock stays
+	 *    at the BW20 default (80 MHz) while BB clocks are at 5/10 MHz, and the
+	 *    timing skew produces a non-decodable waveform. */
+	api->halmac_set_hw_value(mac, HALMAC_HW_BANDWIDTH, &bw_type);
+}
+
 static void switch_chnl_and_set_bw_by_drv(PADAPTER adapter, u8 switch_band)
 {
 	PHAL_DATA_TYPE hal = GET_HAL_DATA(adapter);
@@ -940,7 +1010,12 @@ static void switch_chnl_and_set_bw_by_drv(PADAPTER adapter, u8 switch_band)
 		/* 3.1 set MAC register */
 		mac_switch_bandwidth(adapter, pri_ch_idx);
 
-		/* 3.2 set BB/RF registet */
+		/* 3.2 set runtime-narrowband side effects (HALMAC bw, TBTT, CCK_CHECK).
+		 * Must run before the BB switch so BB clock dividers derive from the
+		 * corrected MAC clock. Idempotent for non-narrow BWs. */
+		rtl8822e_apply_bw_side_effects(adapter, hal->current_channel_bw);
+
+		/* 3.3 set BB/RF registet */
 
 #ifdef CONFIG_NARROWBAND_SUPPORTING
 		if (adapter->registrypriv.rtw_nb_config == RTW_NB_CONFIG_WIDTH_10) {

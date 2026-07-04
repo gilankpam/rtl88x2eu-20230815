@@ -305,15 +305,16 @@ sint rtw_fill_radiotap_hdr(_adapter *padapter, struct rx_pkt_attrib *a, u8 *buf)
 	hdr_buf[rt_len] = 0;
 	rt_len += 1;
 #endif
-#if 0
-	/* Signal Quality, Required Alignment: 2 bytes */
+	/* Signal Quality (EVM magnitude in dB, higher = better), Required Alignment: 2 bytes */
 	rtap_hdr->it_present |= BIT(IEEE80211_RADIOTAP_LOCK_QUALITY);
 	if (!IS_ALIGNED(rt_len, 2))
-	rt_len++;
-	hdr_buf[rt_len] = a->phy_info.signal_quality;
-	rt_len += 2;
+		rt_len++;
+	{
+		__le16 evm_db = cpu_to_le16((u16)a->phy_info.rx_mimo_evm_dbm[0]);
 
-#endif
+		_rtw_memcpy(&hdr_buf[rt_len], &evm_db, 2);
+	}
+	rt_len += 2;
 
 #if 0
 	/* Antenna */
@@ -582,10 +583,14 @@ sint rtw_fill_radiotap_hdr(_adapter *padapter, struct rx_pkt_attrib *a, u8 *buf)
                         hdr_buf[rt_len] = a->phy_info.rx_pwr[i] - a->phy_info.rx_snr[i];
                         rt_len += 1;
 
-			/* Signal Quality */
+			/* Signal Quality (EVM magnitude in dB, higher = better) */
 			if (!IS_ALIGNED(rt_len, 2))
 				rt_len++;
-			hdr_buf[rt_len] = cpu_to_le16(a->phy_info.rx_mimo_signal_quality[i]);
+			{
+				__le16 evm_db = cpu_to_le16((u16)a->phy_info.rx_mimo_evm_dbm[i]);
+
+				_rtw_memcpy(&hdr_buf[rt_len], &evm_db, 2);
+			}
 			rt_len += 2;
 
 			/* Antenna */

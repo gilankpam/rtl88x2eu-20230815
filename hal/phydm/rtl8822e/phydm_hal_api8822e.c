@@ -2046,7 +2046,10 @@ config_phydm_switch_bandwidth_8822e(struct dm_struct *dm, u8 pri_ch,
 			odm_set_bb_reg(dm, R_0x9b0, 0xffc0, 0x1);
 
 			/*DAC clock = 120M clock for BW5 */
-			odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x2);
+			//odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x2);
+
+			// DAC clock fix, from 8822c driver
+			odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x4);
 
 			/*ADC clock = 40M clock for BW5 */
 			odm_set_bb_reg(dm, R_0x9b4, 0x00700000, 0x4);
@@ -2075,7 +2078,10 @@ config_phydm_switch_bandwidth_8822e(struct dm_struct *dm, u8 pri_ch,
 			odm_set_bb_reg(dm, R_0x9b0, 0xffc0, 0x2);
 
 			/*DAC clock = 240M clock for BW10 */
-			odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x4);
+			//odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x4);
+			
+			// DAC clock fix, from 8822c driver
+			odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x6);
 
 			/*ADC clock = 80M clock for BW10 */
 			odm_set_bb_reg(dm, R_0x9b4, 0x00700000, 0x5);
@@ -2104,7 +2110,10 @@ config_phydm_switch_bandwidth_8822e(struct dm_struct *dm, u8 pri_ch,
 			odm_set_bb_reg(dm, R_0x9b0, 0xffc0, 0x0);
 
 			/*DAC clock = 480M clock for BW20 */
-			odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x6);
+			//odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x6);
+			
+			// DAC clock fix, from 8822c driver
+			odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x7);
 
 			/*ADC clock = 160M clock for BW20 */
 			odm_set_bb_reg(dm, R_0x9b4, 0x00700000, 0x6);
