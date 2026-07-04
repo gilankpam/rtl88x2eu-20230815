@@ -2045,11 +2045,16 @@ config_phydm_switch_bandwidth_8822e(struct dm_struct *dm, u8 pri_ch,
 			/*TX pri ch:[11:8]=0x0, RX pri ch:[15:12]=0x0 */
 			odm_set_bb_reg(dm, R_0x9b0, 0xffc0, 0x1);
 
-			/*DAC clock = 120M clock for BW5 */
-			odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x2);
-
-			/*ADC clock = 40M clock for BW5 */
-			odm_set_bb_reg(dm, R_0x9b4, 0x00700000, 0x4);
+			/*DAC/ADC clock: keep the BW20 selectors. The vendor
+			 *values (DAC sel 0x2, ADC sel 0x4) select non-functional
+			 *clock taps on RTL8822E silicon -- with them the link is
+			 *stone dead in both directions. The small-BW resampler
+			 *([7:6] of 0x9b0) alone produces the true 5 MHz waveform
+			 *(verified: 4x airtime vs BW20, 100% decode dongle to
+			 *dongle); the converter clocks only need to be alive.
+			 */
+			odm_set_bb_reg(dm, R_0x9b4, 0x00000700, 0x6);
+			odm_set_bb_reg(dm, R_0x9b4, 0x00700000, 0x6);
 
 			/*Set nbi wa para*/
 			if (dm->en_nbi_detect)
